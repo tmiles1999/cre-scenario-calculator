@@ -1,0 +1,8 @@
+# Default: normalize line endings in the repo
+* text=auto eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+
+# Diff hints
+*.py text diff=python

@@ -1,0 +1,94 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# Packaging / build
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Testing & coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- Type checkers / linters (if you add them later) ---
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+
+# --- Streamlit (never commit secrets) ---
+.streamlit/secrets.toml
+
+# --- Environment & local secrets ---
+.env
+.env.*
+!.env.example
+
+# --- IDEs & editors ---
+.idea/
+
+# Vim / Neovim (swap, backups, persistent undo, netrw)
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-v][a-z]
+[._]sw[a-p]
+*.sw[a-p]
+*.un~
+Session.vim
+.netrwhist
+
+# Emacs (autosave, lockfiles, backups)
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+auto-save-list/
+.\#*
+
+# Nano / Kate / other editors
+*.save
+*.kate-swp
+*.bak
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Logs & local scratch ---
+*.log
+tmp/
+temp/
+
+# --- PyInstaller / frozen builds (if you ever bundle) ---
+*.manifest
+*.spec

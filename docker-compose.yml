@@ -1,0 +1,24 @@
+services:
+  scenarios:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: cre-calcs:latest
+    # Example: docker compose run --rm scenarios --price 3200000 --listing-cap 6.25 --down 30 --rate 6.75 --amort 25 --balloon 10
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: cre-calcs:test
+
+  gui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gui
+    image: cre-calcs-gui:latest
+    ports:
+      - "8501:8501"

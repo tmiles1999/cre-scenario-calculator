@@ -1,0 +1,5 @@
+# https://docs.streamlit.io/develop/concepts/configuration
+# Used for local runs and Streamlit Community Cloud.
+
+[browser]
+gatherUsageStats = false

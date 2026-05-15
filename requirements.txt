@@ -1,0 +1,3 @@
+# Streamlit Community Cloud and other hosts that install from requirements.txt.
+# In the Cloud UI, set the main file to: src/cre_calcs/gui_app.py
+-e .[gui]
