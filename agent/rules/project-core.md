@@ -1,0 +1,26 @@
+# cre-calcs core
+
+Python 3.10+ package under `src/cre_calcs/`. Tests in `tests/` (`pytest -q` from repo root after `pip install -e ".[dev]"`).
+
+## Layers
+
+- **Domain**: `model.py`, `income.py`, `metrics.py`, `mortgage.py`, `scenarios.py`
+- **I/O**: `cli.py`, `wizard.py`, `gui_app.py`, `table.py`, `pdf_report.py`
+- **Parsing**: `percent_parse.py`, `money_parse.py` — always reuse these, do not duplicate ÷100 logic
+
+Keep CLI/GUI/wizard thin; scenario rows come from `scenarios.build_*` only.
+
+## Scope
+
+- Minimal diffs; match existing dataclass, naming, and test style.
+- New scenario type → `ScenarioRow` fields + builder in `scenarios.py` + tests.
+- Streamlit widget keys → `gui_shared.py` + `tests/test_gui_shared.py`.
+- User docs stay in README; agent map in `agent/AGENTS.md` (synced to root `AGENTS.md`).
+
+## Docker
+
+Multi-stage `Dockerfile`: `runtime` (CLI), `test` (pytest), `gui` (Streamlit :8501). Compose service `test` runs `pytest -q`. Wizard needs `-it` in Docker.
+
+## Shared config
+
+Edit agent files under `agent/`, then run `python3 agent/sync.py`. Do not hand-edit generated `.cursor/rules/`, `.claude/rules/`, root `AGENTS.md`, `CLAUDE.md`, or `opencode.json`.

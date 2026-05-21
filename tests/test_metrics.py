@@ -2,7 +2,15 @@
 
 import math
 
-from cre_calcs.metrics import cash_on_cash, debt_service_coverage_ratio, loan_to_value
+import pytest
+
+from cre_calcs.metrics import (
+    cash_on_cash,
+    debt_constant,
+    debt_service_coverage_ratio,
+    loan_amount,
+    loan_to_value,
+)
 from cre_calcs.model import Listing, LoanTerms
 from cre_calcs.mortgage import annual_debt_service
 
@@ -41,6 +49,33 @@ def test_cash_on_cash_and_dscr() -> None:
         noi / ads,
         rel_tol=1e-9,
     )
+
+
+def test_debt_constant_is_annual_debt_service_over_loan_amount() -> None:
+    """Mortgage constant = ADS ÷ initial principal for amortizing P&I."""
+    listing = Listing(purchase_price=1_000_000.0, listing_cap_rate=0.07)
+    loan = LoanTerms(
+        down_payment_fraction=0.20,
+        annual_interest_rate=0.06,
+        amortization_years=30,
+        balloon_years=10,
+    )
+    principal = loan_amount(listing, loan)
+    ads = annual_debt_service(
+        principal=principal,
+        annual_interest_rate=loan.annual_interest_rate,
+        amortization_years=loan.amortization_years,
+    )
+    assert math.isclose(debt_constant(ads, principal), ads / principal, rel_tol=1e-12)
+
+
+def test_debt_constant_zero_loan() -> None:
+    assert debt_constant(0.0, 0.0) == 0.0
+
+
+def test_debt_constant_raises_if_ads_without_principal() -> None:
+    with pytest.raises(ValueError, match="annual_debt_service must be zero"):
+        debt_constant(50_000.0, 0.0)
 
 
 def test_dscr_zero_debt_service() -> None:

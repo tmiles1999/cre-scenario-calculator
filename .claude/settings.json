@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "WebSearch",
+
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(pip *)",
+      "Bash(pip3 *)",
+      "Bash(docker *)",
+      "Bash(docker-compose *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git branch *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git merge *)",
+      "Bash(git rev-parse *)",
+      "Bash(* --version)",
+      "Bash(* --help)",
+
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.python.org)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:code.claude.com)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(git clean *)",
+      "Bash(git rebase *)",
+      "Bash(rm *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.local)",
+      "Read(.env.production)",
+      "Read(.streamlit/secrets.toml)",
+      "Edit(.env)",
+      "Edit(.env.local)",
+      "Edit(.env.production)",
+      "Edit(.streamlit/secrets.toml)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)",
+      "Edit(~/.ssh/**)",
+      "Edit(~/.aws/**)",
+
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(chmod *)",
+      "Bash(chown *)",
+      "Bash(npm publish *)",
+      "Bash(pip publish *)"
+    ]
+  }
+}

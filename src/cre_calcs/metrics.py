@@ -18,6 +18,19 @@ def loan_to_value(listing: Listing, loan: LoanTerms) -> float:
     return loan_amount(listing, loan) / listing.purchase_price
 
 
+def debt_constant(annual_debt_service: float, loan_principal: float) -> float:
+    """Mortgage / debt constant: annual debt service per dollar of loan (ADS ÷ principal).
+
+    For level-pay amortizing debt this is the first-year ratio of P&I to initial
+    balance (e.g. ``0.08`` ≈ 8¢ of annual debt service per $1 of loan).
+    """
+    if loan_principal <= 0.0:
+        if annual_debt_service == 0.0:
+            return 0.0
+        raise ValueError("annual_debt_service must be zero when loan_principal is not positive")
+    return annual_debt_service / loan_principal
+
+
 def cash_on_cash(net_operating_income: float, annual_debt_service: float, equity: float) -> float:
     """Pre-tax cash return on equity: (NOI − debt service) / equity."""
     if equity <= 0:

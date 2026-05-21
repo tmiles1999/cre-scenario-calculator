@@ -1,0 +1,7 @@
+{
+  "instructions": [
+    "AGENTS.md",
+    "agent/rules/project-core.md",
+    "agent/rules/domain-percent-money.md"
+  ]
+}

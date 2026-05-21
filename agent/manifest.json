@@ -1,0 +1,15 @@
+{
+  "rules": [
+    {
+      "id": "project-core",
+      "description": "cre-calcs layout, commands, and change discipline",
+      "always": true
+    },
+    {
+      "id": "domain-percent-money",
+      "description": "CRE parsing conventions and core formulas — critical for correct edits",
+      "always": true
+    }
+  ],
+  "skills": ["sync-agent-config"]
+}
