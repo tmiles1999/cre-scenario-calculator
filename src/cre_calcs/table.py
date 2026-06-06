@@ -7,23 +7,97 @@ import math
 from tabulate import tabulate
 
 from cre_calcs.model import Listing, LoanTerms
-from cre_calcs.mortgage import remaining_balance_after_months
+from cre_calcs.mortgage import annual_debt_service, remaining_balance_after_months
 from cre_calcs.scenarios import ScenarioRow
 
 
-def balloon_snapshot_line(purchase_price: float, loan: LoanTerms) -> str:
-    """One-line balloon balance estimate for a given price and loan."""
+def _balloon_balance(purchase_price: float, loan: LoanTerms) -> float:
     principal = purchase_price * (1.0 - loan.down_payment_fraction)
-    balloon_balance = remaining_balance_after_months(
+    return remaining_balance_after_months(
         principal=principal,
         annual_interest_rate=loan.annual_interest_rate,
         amortization_years=loan.amortization_years,
         months_elapsed=loan.balloon_years * 12,
     )
+
+
+def _price_phrase(purchase_price: float, *, price_label: str | None) -> str:
+    if price_label:
+        return f"at {price_label} ${purchase_price:,.0f}"
+    return f"at ${purchase_price:,.0f}"
+
+
+def offering_price(net_operating_income: float, cap_rate: float) -> float:
+    """List/offering price implied by stated NOI and going-in cap (NOI ÷ cap)."""
+    if cap_rate <= 0:
+        raise ValueError("cap_rate must be positive")
+    return net_operating_income / cap_rate
+
+
+def balloon_snapshot_line(
+    purchase_price: float,
+    loan: LoanTerms,
+    *,
+    price_label: str | None = None,
+) -> str:
+    """One-line balloon balance estimate for a given price and loan."""
+    balloon_balance = _balloon_balance(purchase_price, loan)
+    equity = purchase_price * loan.down_payment_fraction
     return (
-        f"Balloon snapshot at ${purchase_price:,.0f} price, "
-        f"{loan.down_payment_fraction:.0%} down: estimated balance ${balloon_balance:,.0f}"
+        f"Balloon snapshot {_price_phrase(purchase_price, price_label=price_label)} price, "
+        f"{loan.down_payment_fraction:.0%} down (${equity:,.0f}): "
+        f"estimated balance ${balloon_balance:,.0f}"
     )
+
+
+def balloon_cash_flow_line(
+    purchase_price: float,
+    loan: LoanTerms,
+    *,
+    net_operating_income: float,
+    price_label: str = "offer",
+) -> str:
+    """Year-one pre-tax cash flow (NOI − debt service) at a fixed price."""
+    principal = purchase_price * (1.0 - loan.down_payment_fraction)
+    ads = annual_debt_service(
+        principal=principal,
+        annual_interest_rate=loan.annual_interest_rate,
+        amortization_years=loan.amortization_years,
+    )
+    annual_cf = net_operating_income - ads
+    monthly_cf = annual_cf / 12.0
+    return (
+        f"Year-one cash flow {_price_phrase(purchase_price, price_label=price_label)} price, "
+        f"estimated ${monthly_cf:,.0f}/mo (${annual_cf:,.0f}/yr)"
+    )
+
+
+def balloon_context_lines(
+    loan: LoanTerms,
+    *,
+    net_operating_income: float | None = None,
+    list_price: float | None = None,
+    offer_price: float | None = None,
+) -> list[str]:
+    """List (NOI ÷ cap) and offer (purchase price) balloon snapshots plus offer cash flow."""
+    lines: list[str] = []
+    if list_price is not None:
+        lines.append(balloon_snapshot_line(list_price, loan, price_label="list"))
+    if offer_price is not None:
+        if list_price is None or not math.isclose(
+            list_price, offer_price, rel_tol=1e-9, abs_tol=0.5
+        ):
+            lines.append(balloon_snapshot_line(offer_price, loan, price_label="offer"))
+        if net_operating_income is not None:
+            lines.append(
+                balloon_cash_flow_line(
+                    offer_price,
+                    loan,
+                    net_operating_income=net_operating_income,
+                    price_label="offer",
+                )
+            )
+    return lines
 
 
 def scenario_rows_matrix(rows: list[ScenarioRow]) -> tuple[list[str], list[list[str]]]:
@@ -78,13 +152,24 @@ def format_scenario_rows(
     rows: list[ScenarioRow],
     *,
     summary_lines: list[str],
-    balloon_purchase_price: float | None = None,
     balloon_loan: LoanTerms | None = None,
+    balloon_net_operating_income: float | None = None,
+    balloon_list_price: float | None = None,
+    balloon_offer_price: float | None = None,
 ) -> str:
     """Format rows with optional balloon snapshot (same amort assumptions as ``balloon_loan``)."""
     extra: list[str] = []
-    if balloon_purchase_price is not None and balloon_loan is not None:
-        extra.append(balloon_snapshot_line(balloon_purchase_price, balloon_loan))
+    if balloon_loan is not None and (
+        balloon_list_price is not None or balloon_offer_price is not None
+    ):
+        extra.extend(
+            balloon_context_lines(
+                balloon_loan,
+                net_operating_income=balloon_net_operating_income,
+                list_price=balloon_list_price,
+                offer_price=balloon_offer_price,
+            )
+        )
 
     headers, matrix = scenario_rows_matrix(rows)
     body = tabulate(
@@ -109,9 +194,12 @@ def format_scenario_table(
         f"Loan {loan.annual_interest_rate:.2%} {loan.amortization_years}yr amort / "
         f"{loan.balloon_years}yr balloon",
     ]
+    noi = listing.net_operating_income_at_cap(listing.listing_cap_rate)
     return format_scenario_rows(
         rows,
         summary_lines=summary,
-        balloon_purchase_price=listing.purchase_price,
         balloon_loan=loan,
+        balloon_net_operating_income=noi,
+        balloon_list_price=offering_price(noi, listing.listing_cap_rate),
+        balloon_offer_price=listing.purchase_price,
     )

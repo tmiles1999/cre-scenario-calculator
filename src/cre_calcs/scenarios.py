@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from cre_calcs.metrics import (
@@ -117,6 +118,65 @@ def build_cap_implied_price_scenarios(
             )
         )
     return rows
+
+
+def inject_offer_cap_row(
+    rows: list[ScenarioRow],
+    *,
+    operating_income: float,
+    offer_price: float,
+    list_price: float,
+    loan: LoanTerms,
+    implied_price_mode: bool,
+    down_payment_fraction: float | None = None,
+    threshold_fraction: float = 0.01,
+) -> list[ScenarioRow]:
+    """Insert a cap row for the purchase-price offer when it diverges from list (NOI ÷ cap)."""
+    if list_price <= 0 or offer_price <= 0:
+        return rows
+    if abs(offer_price - list_price) / list_price <= threshold_fraction:
+        return rows
+
+    offer_cap = operating_income / offer_price
+    if offer_cap <= 0:
+        return rows
+
+    for r in rows:
+        if r.assumed_cap_rate is not None and math.isclose(
+            r.assumed_cap_rate, offer_cap, rel_tol=1e-9, abs_tol=1e-12
+        ):
+            return rows
+
+    if implied_price_mode:
+        row = _row_metrics(
+            display_label=f"{offer_cap:.2%}",
+            purchase_price=offer_price,
+            net_operating_income=operating_income,
+            loan=loan,
+            assumed_cap_rate=offer_cap,
+            implied_purchase_price=offer_price,
+            effective_down_payment_fraction=down_payment_fraction,
+        )
+    else:
+        row = _row_metrics(
+            display_label=f"{offer_cap:.2%}",
+            purchase_price=offer_price,
+            net_operating_income=operating_income,
+            loan=loan,
+            assumed_cap_rate=offer_cap,
+            implied_purchase_price=None,
+            effective_down_payment_fraction=None,
+        )
+
+    insert_at = len(rows)
+    for i, r in enumerate(rows):
+        if r.assumed_cap_rate is not None and r.assumed_cap_rate > offer_cap:
+            insert_at = i
+            break
+
+    out = list(rows)
+    out.insert(insert_at, row)
+    return out
 
 
 def build_down_payment_scenarios(

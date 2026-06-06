@@ -64,7 +64,7 @@ def _optional_escalator() -> float:
 
 def _income_stated_interactive() -> StatedNoi:
     y1 = _money(
-        questionary.text("Year-1 NOI or total contract rent (e.g. 155k):", default="155k").ask()
+        questionary.text("Year-1 NOI or total contract rent (e.g. 155.808k):", default="155.808k").ask()
         or "0"
     )
     esc = _optional_escalator()
@@ -80,7 +80,7 @@ def _loan_rates_interactive() -> LoanRateTerms:
         or "6.5"
     )
     amort = _int(questionary.text("Amortization (years):", default="25").ask() or "25")
-    balloon = _int(questionary.text("Balloon / maturity (years):", default="10").ask() or "10")
+    balloon = _int(questionary.text("Balloon / maturity (years):", default="5").ask() or "5")
     return LoanRateTerms(
         annual_interest_rate=rate,
         amortization_years=amort,
@@ -154,7 +154,9 @@ def run_wizard() -> None:
         sys.exit(0)
 
     if sweep == "cap_fixed":
-        price = _money(questionary.text("Purchase / offer price (e.g. 2.7M):", default="2.7M").ask() or "0")
+        price = _money(
+            questionary.text("Purchase / offer price (e.g. 2.597M):", default="2.597M").ask() or "0"
+        )
         listing_cap = _positive_percent(
             questionary.text("Listing / center cap (%, e.g. 6.25 for 6.25%):", default="6.25").ask()
             or "6.25"
@@ -210,14 +212,17 @@ def run_wizard() -> None:
             format_scenario_rows(
                 rows,
                 summary_lines=summary,
-                balloon_purchase_price=ref_price,
                 balloon_loan=loan,
+                balloon_net_operating_income=noi,
+                balloon_list_price=ref_price,
             )
         )
         return
 
     # down payment sweep
-    price = _money(questionary.text("Fixed purchase price (e.g. 2.7M):", default="2.7M").ask() or "0")
+    price = _money(
+        questionary.text("Fixed purchase price (e.g. 2.597M):", default="2.597M").ask() or "0"
+    )
     listing_cap = _positive_percent(
         questionary.text(
             "Reference listing cap for labels (%, e.g. 6.25 for 6.25%):",
@@ -244,7 +249,9 @@ def run_wizard() -> None:
         format_scenario_rows(
             rows,
             summary_lines=summary,
-            balloon_purchase_price=price,
             balloon_loan=loan,
+            balloon_net_operating_income=noi,
+            balloon_list_price=noi / listing_cap,
+            balloon_offer_price=price,
         )
     )

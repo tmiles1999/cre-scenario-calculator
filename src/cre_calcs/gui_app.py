@@ -28,8 +28,9 @@ from cre_calcs.scenarios import (
     build_cap_implied_price_scenarios,
     build_cap_rate_scenarios,
     build_down_payment_scenarios,
+    inject_offer_cap_row,
 )
-from cre_calcs.table import balloon_snapshot_line, scenario_rows_matrix
+from cre_calcs.table import balloon_context_lines, offering_price, scenario_rows_matrix
 
 st.set_page_config(page_title="CRE Scenarios", layout="wide", initial_sidebar_state="expanded")
 
@@ -37,6 +38,30 @@ st.set_page_config(page_title="CRE Scenarios", layout="wide", initial_sidebar_st
 def _pct(x: float) -> float:
     """Display percent (e.g. 6.25) to decimal rate."""
     return x / 100.0
+
+
+def _caption_line(line: str) -> None:
+    """Render a caption without Streamlit treating ``$`` as LaTeX math delimiters."""
+    st.caption(line.replace("$", r"\$"))
+
+
+def _sidebar_purchase_price_and_loan(
+    *,
+    price_raw: str,
+    rate: float,
+    amort: int,
+    balloon: int,
+    loan_down_pct: float,
+) -> tuple[float, LoanTerms]:
+    """Balloon block: loan sized from sidebar purchase price and shared loan down %."""
+    price = parse_money_amount(price_raw)
+    loan = LoanTerms(
+        down_payment_fraction=_pct(loan_down_pct),
+        annual_interest_rate=rate,
+        amortization_years=amort,
+        balloon_years=balloon,
+    )
+    return price, loan
 
 
 def _sidebar_label_field() -> tuple[object, object]:
@@ -108,7 +133,7 @@ def _loan_inputs(*, label_prefix: str = "", key_prefix: str) -> tuple[float, int
             label_visibility="collapsed",
             min_value=1,
             max_value=40,
-            value=10,
+            value=5,
             key=k_balloon,
         )
     return _pct(rate_pct), int(amort), int(balloon)
@@ -181,24 +206,43 @@ def _render_table_and_pdf(
     rows: list[ScenarioRow],
     summary_lines: list[str],
     *,
-    balloon_price: float | None,
     balloon_loan: LoanTerms | None,
+    balloon_noi: float | None = None,
+    balloon_list_price: float | None = None,
+    balloon_offer_price: float | None = None,
     pdf_title: str,
     download_button_key: str,
     pdf_footer: list[str] | None = None,
 ) -> None:
     st.subheader("Scenario Results")
     for line in summary_lines:
-        st.caption(line)
-    if balloon_price is not None and balloon_loan is not None:
-        st.caption(balloon_snapshot_line(balloon_price, balloon_loan))
+        _caption_line(line)
+    if balloon_loan is not None and (
+        balloon_list_price is not None or balloon_offer_price is not None
+    ):
+        for line in balloon_context_lines(
+            balloon_loan,
+            net_operating_income=balloon_noi,
+            list_price=balloon_list_price,
+            offer_price=balloon_offer_price,
+        ):
+            _caption_line(line)
 
     headers, matrix = scenario_rows_matrix(rows)
     st.dataframe(pd.DataFrame(matrix, columns=headers), use_container_width=True, hide_index=True)
 
     extra_summary = list(summary_lines)
-    if balloon_price is not None and balloon_loan is not None:
-        extra_summary.append(balloon_snapshot_line(balloon_price, balloon_loan))
+    if balloon_loan is not None and (
+        balloon_list_price is not None or balloon_offer_price is not None
+    ):
+        extra_summary.extend(
+            balloon_context_lines(
+                balloon_loan,
+                net_operating_income=balloon_noi,
+                list_price=balloon_list_price,
+                offer_price=balloon_offer_price,
+            )
+        )
 
     from cre_calcs.pdf_report import build_scenario_pdf
 
@@ -230,6 +274,7 @@ def tab_cap_fixed(
     sweep: CapRateSweep,
     *,
     price_raw: str,
+    operating_noi_raw: str,
     listing_cap_pct: float,
     loan_down_pct: float,
 ) -> None:
@@ -252,6 +297,24 @@ def tab_cap_fixed(
             balloon_years=balloon,
         )
         rows = build_cap_rate_scenarios(listing, loan, sweep)
+        balloon_noi = parse_money_amount(operating_noi_raw)
+        balloon_offer_price = parse_money_amount(price_raw)
+        balloon_list_price = offering_price(balloon_noi, sweep.center_cap_rate)
+        rows = inject_offer_cap_row(
+            rows,
+            operating_income=balloon_noi,
+            offer_price=balloon_offer_price,
+            list_price=balloon_list_price,
+            loan=loan,
+            implied_price_mode=False,
+        )
+        _, balloon_loan = _sidebar_purchase_price_and_loan(
+            price_raw=price_raw,
+            rate=rate,
+            amort=amort,
+            balloon=balloon,
+            loan_down_pct=loan_down_pct,
+        )
         summary = [
             f"Purchase ${listing.purchase_price:,.0f}; listing cap {listing_cap_pct:.4f}%; "
             f"loan {rate:.4%} {amort}yr/{balloon}yr balloon; down {loan_down_pct:.2f}%."
@@ -259,8 +322,10 @@ def tab_cap_fixed(
         _render_table_and_pdf(
             rows,
             summary,
-            balloon_price=listing.purchase_price,
-            balloon_loan=loan,
+            balloon_loan=balloon_loan,
+            balloon_noi=balloon_noi,
+            balloon_list_price=balloon_list_price,
+            balloon_offer_price=balloon_offer_price,
             pdf_title="CRE Analysis — Cap Sweep (Fixed Price)",
             download_button_key="pdf_dl_cap_fixed",
         )
@@ -275,6 +340,7 @@ def tab_implied_price(
     sweep: CapRateSweep,
     *,
     loan_down_pct: float,
+    price_raw: str,
     operating_noi_raw: str,
 ) -> None:
     st.subheader("Cap Sweep to Implied Purchase Price")
@@ -383,6 +449,23 @@ def tab_implied_price(
         loan = rates.with_down_payment(_pct(loan_down_pct))
         cc = sweep.center_cap_rate
         ref_p = noi / cc if cc else 0.0
+        offer_price = parse_money_amount(price_raw)
+        rows = inject_offer_cap_row(
+            rows,
+            operating_income=noi,
+            offer_price=offer_price,
+            list_price=ref_p,
+            loan=loan,
+            implied_price_mode=True,
+            down_payment_fraction=_pct(loan_down_pct),
+        )
+        _, balloon_loan = _sidebar_purchase_price_and_loan(
+            price_raw=price_raw,
+            rate=rate,
+            amort=amort,
+            balloon=balloon,
+            loan_down_pct=loan_down_pct,
+        )
         summary = [
             f"Operating income (analysis year {int(analysis_year)}): ${noi:,.0f} "
             f"— same for every cap row (shown here only; omitted from the table).",
@@ -392,8 +475,10 @@ def tab_implied_price(
         _render_table_and_pdf(
             rows,
             summary,
-            balloon_price=ref_p,
-            balloon_loan=loan,
+            balloon_loan=balloon_loan,
+            balloon_noi=noi,
+            balloon_list_price=ref_p,
+            balloon_offer_price=offer_price,
             pdf_title="CRE Analysis — Implied Price (Cap on NOI)",
             download_button_key="pdf_dl_implied",
         )
@@ -409,6 +494,7 @@ def tab_down_sweep(
     price_raw: str,
     operating_noi_raw: str,
     listing_cap_pct: float,
+    loan_down_pct: float,
 ) -> None:
     st.subheader("Down Payment Sweep")
     st.caption(
@@ -443,7 +529,13 @@ def tab_down_sweep(
             loan_rates=rates,
             sweep=sweep,
         )
-        loan = rates.with_down_payment(sweep.center_down_payment_fraction)
+        _, balloon_loan = _sidebar_purchase_price_and_loan(
+            price_raw=price_raw,
+            rate=rate,
+            amort=amort,
+            balloon=balloon,
+            loan_down_pct=loan_down_pct,
+        )
         summary = [
             f"Price ${price:,.0f}; NOI ${noi:,.0f}/yr; ref. cap {listing_cap_pct:.4f}%; "
             f"loan {rate:.4%} {amort}yr/{balloon}yr."
@@ -451,8 +543,10 @@ def tab_down_sweep(
         _render_table_and_pdf(
             rows,
             summary,
-            balloon_price=price,
-            balloon_loan=loan,
+            balloon_loan=balloon_loan,
+            balloon_noi=noi,
+            balloon_list_price=offering_price(noi, _pct(listing_cap_pct)),
+            balloon_offer_price=price,
             pdf_title="CRE Analysis — Down Payment Sweep",
             download_button_key="pdf_dl_down_sweep",
         )
@@ -504,9 +598,9 @@ def main() -> None:
         with rp:
             price_raw = st.text_input(
                 "purchase_price",
-                value="3.2M",
+                value="2.597M",
                 label_visibility="collapsed",
-                help="e.g. 3.2M, 874k — fixed-price cap & down sweep.",
+                help="e.g. 2.597M, 874k — scenario tabs plus balloon/cash-flow lines on every tab.",
                 key=SHARED_PURCHASE_PRICE_KEY,
             )
         ll, rl = _sidebar_label_field()
@@ -543,7 +637,7 @@ def main() -> None:
         with ro:
             operating_noi_raw = st.text_input(
                 "operating_noi",
-                value="155k",
+                value="155.808k",
                 label_visibility="collapsed",
                 key=SHARED_OPERATING_NOI_RAW_KEY,
                 help="Implied tab (stated Y1) and down sweep (annual NOI).",
@@ -557,6 +651,7 @@ def main() -> None:
             balloon,
             sweep,
             loan_down_pct=loan_down_pct,
+            price_raw=price_raw,
             operating_noi_raw=operating_noi_raw,
         )
     with tab2:
@@ -567,6 +662,7 @@ def main() -> None:
             price_raw=price_raw,
             operating_noi_raw=operating_noi_raw,
             listing_cap_pct=listing_cap_pct,
+            loan_down_pct=loan_down_pct,
         )
     with tab3:
         tab_cap_fixed(
@@ -575,6 +671,7 @@ def main() -> None:
             balloon,
             sweep,
             price_raw=price_raw,
+            operating_noi_raw=operating_noi_raw,
             listing_cap_pct=listing_cap_pct,
             loan_down_pct=loan_down_pct,
         )
