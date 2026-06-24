@@ -4,6 +4,7 @@ from cre_calcs.gui_shared import (
     SHARED_CAP_SWEEP_WIDGET_KEY_PREFIX,
     SHARED_LOAN_WIDGET_KEY_PREFIX,
     cap_sweep_widget_keys,
+    implied_escalator_widget_keys,
     loan_input_widget_keys,
     shared_deal_assumption_keys,
 )
@@ -39,4 +40,13 @@ def test_shared_deal_keys_disjoint_from_loan_and_cap_keys() -> None:
     cap = set(cap_sweep_widget_keys())
     assert deal.isdisjoint(loan)
     assert deal.isdisjoint(cap)
-    assert len(deal) == 4
+    assert len(deal) == 3
+
+
+def test_implied_escalator_widget_keys_are_unique() -> None:
+    keys = implied_escalator_widget_keys()
+    assert len(keys) == 8
+    assert len(set(keys)) == 8
+    assert set(keys).isdisjoint(loan_input_widget_keys())
+    assert set(keys).isdisjoint(cap_sweep_widget_keys())
+    assert set(keys).isdisjoint(shared_deal_assumption_keys())

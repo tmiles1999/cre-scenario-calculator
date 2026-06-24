@@ -4,12 +4,14 @@ import math
 
 import pytest
 
+from cre_calcs.income import StatedNoi
 from cre_calcs.model import CapRateSweep, DownPaymentSweep, LoanRateTerms
 from cre_calcs.model import Listing, LoanTerms
 from cre_calcs.scenarios import (
     build_cap_implied_price_scenarios,
     build_cap_rate_scenarios,
     build_down_payment_scenarios,
+    build_year_projection,
     inject_offer_cap_row,
 )
 
@@ -138,3 +140,60 @@ def test_down_payment_sweep_changes_ltv() -> None:
     )
     ltvs = [r.loan_to_value for r in rows]
     assert min(ltvs) < max(ltvs)
+
+
+def test_implied_price_anchors_acquisition_when_analysis_year_advances() -> None:
+    y1_noi = 500_000.0
+    stated = StatedNoi(year1_noi=y1_noi, annual_escalator_fraction=0.03)
+    y5_noi = stated.operating_income_year(5)
+    rates = LoanRateTerms(0.065, 25, 5)
+    sweep = CapRateSweep(0.06, 0.01, 0, 0)
+    months_elapsed = 48
+
+    rows_y1 = build_cap_implied_price_scenarios(
+        operating_income=y1_noi,
+        going_in_income=y1_noi,
+        months_elapsed=0,
+        down_payment_fraction=0.25,
+        loan_rates=rates,
+        cap_sweep=sweep,
+    )
+    rows_y5 = build_cap_implied_price_scenarios(
+        operating_income=y5_noi,
+        going_in_income=y1_noi,
+        months_elapsed=months_elapsed,
+        down_payment_fraction=0.25,
+        loan_rates=rates,
+        cap_sweep=sweep,
+    )
+    r1 = rows_y1[0]
+    r5 = rows_y5[0]
+    assert math.isclose(r1.implied_purchase_price or 0.0, r5.implied_purchase_price or 0.0, rel_tol=1e-9)
+    assert math.isclose(r1.annual_debt_service, r5.annual_debt_service, rel_tol=1e-6)
+    assert r5.net_operating_income > r1.net_operating_income
+    assert (r5.debt_service_coverage_ratio or 0.0) > (r1.debt_service_coverage_ratio or 0.0)
+    assert r5.loan_to_value < r1.loan_to_value
+
+
+def test_build_year_projection_grows_noi_and_falls_ltv() -> None:
+    stated = StatedNoi(year1_noi=500_000.0, annual_escalator_fraction=0.03)
+    loan = LoanTerms(0.25, 0.065, 25, 5)
+    offer_price = 8_000_000.0
+    valuation_cap = 500_000.0 / offer_price
+    rows = build_year_projection(
+        going_in_price=offer_price,
+        stated_noi=stated,
+        loan=loan,
+        valuation_cap_rate=valuation_cap,
+        years=5,
+    )
+    assert len(rows) == 5
+    assert rows[0].year == 1
+    assert math.isclose(rows[0].loan_to_value, 0.75, rel_tol=1e-6)
+    assert rows[-1].net_operating_income > rows[0].net_operating_income
+    assert rows[-1].cash_flow > rows[0].cash_flow
+    assert rows[-1].cash_on_cash > rows[0].cash_on_cash
+    assert math.isclose(rows[0].cash_on_cash, rows[0].cash_flow / rows[0].equity, rel_tol=1e-9)
+    assert rows[-1].loan_balance < rows[0].loan_balance
+    assert rows[-1].loan_to_value < rows[0].loan_to_value
+    assert math.isclose(rows[0].annual_debt_service, rows[-1].annual_debt_service, rel_tol=1e-6)

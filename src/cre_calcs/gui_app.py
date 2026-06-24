@@ -6,8 +6,15 @@ import pandas as pd
 import streamlit as st
 
 from cre_calcs.gui_shared import (
+    IMPLIED_ESC_MODEL_KEY,
+    IMPLIED_ESC_PCT_KEY,
+    IMPLIED_PROJECTION_HORIZON_KEY,
+    IMPLIED_STEP_AMT_MONEY_KEY,
+    IMPLIED_STEP_AMT_PCT_KEY,
+    IMPLIED_STEP_EVERY_KEY,
+    IMPLIED_STEP_KIND_KEY,
+    IMPLIED_STEP_UNIT_KEY,
     SHARED_CAP_SWEEP_WIDGET_KEY_PREFIX,
-    SHARED_LISTING_CAP_PCT_KEY,
     SHARED_LOAN_DOWN_PCT_KEY,
     SHARED_LOAN_WIDGET_KEY_PREFIX,
     SHARED_OPERATING_NOI_RAW_KEY,
@@ -28,9 +35,15 @@ from cre_calcs.scenarios import (
     build_cap_implied_price_scenarios,
     build_cap_rate_scenarios,
     build_down_payment_scenarios,
+    build_year_projection,
     inject_offer_cap_row,
 )
-from cre_calcs.table import balloon_context_lines, offering_price, scenario_rows_matrix
+from cre_calcs.table import (
+    balloon_context_lines,
+    offering_price,
+    scenario_rows_matrix,
+    year_projection_matrix,
+)
 
 st.set_page_config(page_title="CRE Scenarios", layout="wide", initial_sidebar_state="expanded")
 
@@ -165,7 +178,7 @@ def _sweep_cap_inputs(*, label_prefix: str = "", key_prefix: str) -> CapRateSwee
             min_value=0.01,
             max_value=10.0,
             value=0.1,
-            step=0.1,
+            step=0.05,
             format="%.4f",
             help="Per row, in display percent (0.1 = 0.1% = 10 bps).",
             key=k_step,
@@ -210,6 +223,9 @@ def _render_table_and_pdf(
     balloon_noi: float | None = None,
     balloon_list_price: float | None = None,
     balloon_offer_price: float | None = None,
+    balloon_exit_noi: float | None = None,
+    balloon_valuation_cap_rate: float | None = None,
+    balloon_income_year: int | None = None,
     pdf_title: str,
     download_button_key: str,
     pdf_footer: list[str] | None = None,
@@ -225,6 +241,9 @@ def _render_table_and_pdf(
             net_operating_income=balloon_noi,
             list_price=balloon_list_price,
             offer_price=balloon_offer_price,
+            exit_noi=balloon_exit_noi,
+            valuation_cap_rate=balloon_valuation_cap_rate,
+            income_year=balloon_income_year,
         ):
             _caption_line(line)
 
@@ -241,6 +260,9 @@ def _render_table_and_pdf(
                 net_operating_income=balloon_noi,
                 list_price=balloon_list_price,
                 offer_price=balloon_offer_price,
+                exit_noi=balloon_exit_noi,
+                valuation_cap_rate=balloon_valuation_cap_rate,
+                income_year=balloon_income_year,
             )
         )
 
@@ -267,6 +289,43 @@ def _render_table_and_pdf(
     )
 
 
+def _render_year_projection(
+    *,
+    stated_noi: StatedNoi,
+    loan: LoanTerms,
+    offer_price: float,
+    y1_noi: float,
+    horizon_years: int,
+) -> None:
+    """Year-by-year NOI, cash flow, DSCR, and LTV at the fixed offer price."""
+    if offer_price <= 0 or y1_noi <= 0:
+        return
+    valuation_cap = y1_noi / offer_price
+    projection = build_year_projection(
+        going_in_price=offer_price,
+        stated_noi=stated_noi,
+        loan=loan,
+        valuation_cap_rate=valuation_cap,
+        years=int(horizon_years),
+    )
+    st.subheader("Year-by-Year Projection")
+    st.caption(
+        f"Acquisition anchored at offer ${offer_price:,.0f} with going-in cap "
+        f"{valuation_cap:.2%} (Y1 NOI ÷ price). Debt service is fixed; NOI, cash flow, "
+        f"DSCR, and LTV move with escalation."
+    )
+    headers, matrix = year_projection_matrix(projection)
+    st.dataframe(pd.DataFrame(matrix, columns=headers), use_container_width=True, hide_index=True)
+    chart_df = pd.DataFrame(
+        {
+            "NOI": [r.net_operating_income for r in projection],
+            "Cash Flow": [r.cash_flow for r in projection],
+        },
+        index=[r.year for r in projection],
+    )
+    st.line_chart(chart_df, use_container_width=True)
+
+
 def tab_cap_fixed(
     rate: float,
     amort: int,
@@ -275,20 +334,19 @@ def tab_cap_fixed(
     *,
     price_raw: str,
     operating_noi_raw: str,
-    listing_cap_pct: float,
     loan_down_pct: float,
 ) -> None:
     st.subheader("Cap Rate Sweep at a Fixed Purchase Price")
     st.caption(
         "NOI = purchase price × each row’s assumed going-in cap. "
-        "Purchase price, listing cap, and loan down % are in the sidebar (shared)."
+        "Purchase price and loan down % are in the sidebar (shared); center cap anchors the grid."
     )
 
     try:
         price = parse_money_amount(price_raw)
         listing = Listing(
             purchase_price=price,
-            listing_cap_rate=_pct(listing_cap_pct),
+            listing_cap_rate=sweep.center_cap_rate,
         )
         loan = LoanTerms(
             down_payment_fraction=_pct(loan_down_pct),
@@ -316,7 +374,7 @@ def tab_cap_fixed(
             loan_down_pct=loan_down_pct,
         )
         summary = [
-            f"Purchase ${listing.purchase_price:,.0f}; listing cap {listing_cap_pct:.4f}%; "
+            f"Purchase ${listing.purchase_price:,.0f}; center cap {sweep.center_cap_rate:.2%}; "
             f"loan {rate:.4%} {amort}yr/{balloon}yr balloon; down {loan_down_pct:.2f}%."
         ]
         _render_table_and_pdf(
@@ -345,8 +403,9 @@ def tab_implied_price(
 ) -> None:
     st.subheader("Cap Sweep to Implied Purchase Price")
     st.caption(
-        "Stated NOI (from sidebar) ÷ cap = implied price; loan sized off each implied price. "
-        "Loan down % is in the sidebar (shared with Cap at Fixed Price)."
+        "Going-in price = Year-1 NOI ÷ cap, sized at acquisition for every cap row. "
+        "Set NOI growth below to drive the year-by-year projection and balloon exit. "
+        "Loan down % is in the sidebar."
     )
 
     with st.container():
@@ -354,7 +413,7 @@ def tab_implied_price(
             "NOI Growth",
             ["Annual (Compound Each Year)", "Step on a Schedule"],
             horizontal=True,
-            key="implied_esc_model",
+            key=IMPLIED_ESC_MODEL_KEY,
         )
         annual_esc = esc_model.startswith("Annual")
         esc_pct = st.number_input(
@@ -362,7 +421,7 @@ def tab_implied_price(
             value=0.0,
             step=0.1,
             format="%.4f",
-            key="implied_esc_pct",
+            key=IMPLIED_ESC_PCT_KEY,
             disabled=not annual_esc,
             help="Applied every analysis year (display %, e.g. 3 = 3%).",
         )
@@ -375,7 +434,7 @@ def tab_implied_price(
                 max_value=120,
                 value=1,
                 step=1,
-                key="implied_step_every",
+                key=IMPLIED_STEP_EVERY_KEY,
                 disabled=annual_esc,
             )
         with c_step[1]:
@@ -383,7 +442,7 @@ def tab_implied_price(
                 "Period Unit",
                 ["yrs", "mo"],
                 index=0,
-                key="implied_step_unit",
+                key=IMPLIED_STEP_UNIT_KEY,
                 disabled=annual_esc,
             )
         with c_step[2]:
@@ -391,7 +450,7 @@ def tab_implied_price(
                 "Increase Type",
                 ["%", "$"],
                 index=0,
-                key="implied_step_kind",
+                key=IMPLIED_STEP_KIND_KEY,
                 disabled=annual_esc,
             )
         with c_step[3]:
@@ -400,23 +459,24 @@ def tab_implied_price(
                 value=3.0,
                 step=0.1,
                 format="%.4f",
-                key="implied_step_amt_pct",
+                key=IMPLIED_STEP_AMT_PCT_KEY,
                 disabled=annual_esc or step_kind != "%",
                 help="Display percent per completed period (e.g. 3 = 3%).",
             )
             step_amt_money = st.text_input(
                 "Increase ($/Step)",
                 value="1000",
-                key="implied_step_amt_money",
+                key=IMPLIED_STEP_AMT_MONEY_KEY,
                 disabled=annual_esc or step_kind != "$",
                 help="Dollar bump per completed period (e.g. 1k, 2500).",
             )
-        analysis_year = st.number_input(
-            "Analysis Year",
+        projection_horizon = st.number_input(
+            "Projection Horizon (Yr)",
             min_value=1,
             max_value=30,
-            value=1,
-            key="implied_analysis_year",
+            value=10,
+            key=IMPLIED_PROJECTION_HORIZON_KEY,
+            help="Years shown in the year-by-year projection table and chart.",
         )
 
     try:
@@ -433,7 +493,7 @@ def tab_implied_price(
             stated_noi = StatedNoi(year1_noi=y1, annual_escalator_fraction=_pct(esc_pct))
         else:
             stated_noi = StatedNoi(year1_noi=y1, annual_escalator_fraction=0.0, step_escalator=step)
-        noi = stated_noi.operating_income_year(int(analysis_year))
+        y1_noi = stated_noi.operating_income_year(1)
     except ValueError as e:
         st.error(str(e))
         return
@@ -441,18 +501,19 @@ def tab_implied_price(
     try:
         rates = LoanRateTerms(rate, amort, balloon)
         rows = build_cap_implied_price_scenarios(
-            operating_income=noi,
+            operating_income=y1_noi,
             down_payment_fraction=_pct(loan_down_pct),
             loan_rates=rates,
             cap_sweep=sweep,
         )
         loan = rates.with_down_payment(_pct(loan_down_pct))
         cc = sweep.center_cap_rate
-        ref_p = noi / cc if cc else 0.0
+        ref_p = y1_noi / cc if cc else 0.0
         offer_price = parse_money_amount(price_raw)
+        valuation_cap = y1_noi / offer_price if offer_price > 0 else 0.0
         rows = inject_offer_cap_row(
             rows,
-            operating_income=noi,
+            operating_income=y1_noi,
             offer_price=offer_price,
             list_price=ref_p,
             loan=loan,
@@ -466,21 +527,31 @@ def tab_implied_price(
             balloon=balloon,
             loan_down_pct=loan_down_pct,
         )
+        exit_noi = stated_noi.operating_income_year(balloon)
         summary = [
-            f"Operating income (analysis year {int(analysis_year)}): ${noi:,.0f} "
-            f"— same for every cap row (shown here only; omitted from the table).",
+            f"Going-in NOI ${y1_noi:,.0f} — same for every cap row "
+            f"(shown here only; omitted from the table).",
             f"Down {loan_down_pct:.2f}%; loan {rate:.4%} {amort}yr/{balloon}yr balloon; "
-            f"reference price @ center cap ≈ ${ref_p:,.0f}.",
+            f"going-in reference price @ center cap ≈ ${ref_p:,.0f}.",
         ]
         _render_table_and_pdf(
             rows,
             summary,
             balloon_loan=balloon_loan,
-            balloon_noi=noi,
+            balloon_noi=y1_noi,
             balloon_list_price=ref_p,
             balloon_offer_price=offer_price,
+            balloon_exit_noi=exit_noi,
+            balloon_valuation_cap_rate=valuation_cap,
             pdf_title="CRE Analysis — Implied Price (Cap on NOI)",
             download_button_key="pdf_dl_implied",
+        )
+        _render_year_projection(
+            stated_noi=stated_noi,
+            loan=loan,
+            offer_price=offer_price,
+            y1_noi=y1_noi,
+            horizon_years=int(projection_horizon),
         )
     except ValueError as e:
         st.error(str(e))
@@ -490,16 +561,16 @@ def tab_down_sweep(
     rate: float,
     amort: int,
     balloon: int,
+    cap_sweep: CapRateSweep,
     *,
     price_raw: str,
     operating_noi_raw: str,
-    listing_cap_pct: float,
     loan_down_pct: float,
 ) -> None:
     st.subheader("Down Payment Sweep")
     st.caption(
         "Fixed price and NOI; LTV and cash-on-cash move with equity. "
-        "Purchase price, operating NOI, and reference cap are in the sidebar (shared)."
+        "Purchase price and operating NOI are in the sidebar; center cap labels rows and balloon list price."
     )
 
     c5, c6, c7, c8 = st.columns(4)
@@ -525,7 +596,7 @@ def tab_down_sweep(
         rows = build_down_payment_scenarios(
             purchase_price=price,
             operating_income=noi,
-            listing_cap_for_display=_pct(listing_cap_pct),
+            listing_cap_for_display=cap_sweep.center_cap_rate,
             loan_rates=rates,
             sweep=sweep,
         )
@@ -536,8 +607,9 @@ def tab_down_sweep(
             balloon=balloon,
             loan_down_pct=loan_down_pct,
         )
+        ref_cap = cap_sweep.center_cap_rate
         summary = [
-            f"Price ${price:,.0f}; NOI ${noi:,.0f}/yr; ref. cap {listing_cap_pct:.4f}%; "
+            f"Price ${price:,.0f}; NOI ${noi:,.0f}/yr; ref. cap {ref_cap:.2%}; "
             f"loan {rate:.4%} {amort}yr/{balloon}yr."
         ]
         _render_table_and_pdf(
@@ -545,7 +617,7 @@ def tab_down_sweep(
             summary,
             balloon_loan=balloon_loan,
             balloon_noi=noi,
-            balloon_list_price=offering_price(noi, _pct(listing_cap_pct)),
+            balloon_list_price=offering_price(noi, ref_cap),
             balloon_offer_price=price,
             pdf_title="CRE Analysis — Down Payment Sweep",
             download_button_key="pdf_dl_down_sweep",
@@ -562,35 +634,11 @@ def main() -> None:
     )
 
     with st.sidebar:
-        st.header("Mortgage Terms (All Tabs)")
-        st.caption(
-            "Interest rate, amortization, and balloon maturity—used everywhere "
-            "the model sizes annual debt service and LTV."
-        )
-        rate, amort, balloon = _loan_inputs(
-            label_prefix="",
-            key_prefix=SHARED_LOAN_WIDGET_KEY_PREFIX,
-        )
-        st.divider()
-        st.subheader("Going-In Cap Grid (Two Cap Tabs)")
-        st.caption(
-            "Center cap, step size, and how many rows below/above center. "
-            "Each scenario row is one going-in cap—on **Implied Price** (purchase price moves with cap) "
-            "and **Cap at Fixed Price** (NOI moves with cap). "
-            "Not used on **Down Payment**."
-        )
-        sweep = _sweep_cap_inputs(
-            label_prefix="",
-            key_prefix=SHARED_CAP_SWEEP_WIDGET_KEY_PREFIX,
-        )
-        st.divider()
-        st.subheader("Deal: Price, Income, Caps, Loan Down")
+        st.header("Deal: Price, Income, Loan Down")
         st.caption(
             "**Implied Price:** Y1 / operating NOI and loan down % (price = NOI ÷ row cap). "
-            "**Down Payment:** same price and NOI; listing cap is a display reference only—"
-            "that tab’s down % grid replaces sidebar loan down for sizing. "
-            "**Cap at Fixed Price:** purchase price, listing cap, and loan down % "
-            "(NOI = price × row cap)."
+            "**Down Payment:** same price and NOI; that tab’s down % grid replaces sidebar loan down "
+            "for sizing. **Cap at Fixed Price:** purchase price and loan down % (NOI = price × row cap)."
         )
         lp, rp = _sidebar_label_field()
         with lp:
@@ -602,19 +650,6 @@ def main() -> None:
                 label_visibility="collapsed",
                 help="e.g. 2.597M, 874k — scenario tabs plus balloon/cash-flow lines on every tab.",
                 key=SHARED_PURCHASE_PRICE_KEY,
-            )
-        ll, rl = _sidebar_label_field()
-        with ll:
-            st.caption("List / Ref Cap (%)")
-        with rl:
-            listing_cap_pct = st.number_input(
-                "listing_ref_cap_pct",
-                label_visibility="collapsed",
-                value=6.0,
-                step=0.1,
-                format="%.4f",
-                key=SHARED_LISTING_CAP_PCT_KEY,
-                help="Listing cap for fixed-price tab; reference cap for down sweep.",
             )
         ld, rd = _sidebar_label_field()
         with ld:
@@ -642,6 +677,28 @@ def main() -> None:
                 key=SHARED_OPERATING_NOI_RAW_KEY,
                 help="Implied tab (stated Y1) and down sweep (annual NOI).",
             )
+        st.divider()
+        st.subheader("Going-In Cap Grid")
+        st.caption(
+            "Center cap, step size, and how many rows below/above center. "
+            "Each scenario row is one going-in cap—on **Implied Price** (price = NOI ÷ cap) "
+            "and **Cap at Fixed Price** (NOI = price × cap). "
+            "Center cap also labels **Down Payment** rows and balloon list price."
+        )
+        sweep = _sweep_cap_inputs(
+            label_prefix="",
+            key_prefix=SHARED_CAP_SWEEP_WIDGET_KEY_PREFIX,
+        )
+        st.divider()
+        st.header("Mortgage Terms (All Tabs)")
+        st.caption(
+            "Interest rate, amortization, and balloon maturity—used everywhere "
+            "the model sizes annual debt service and LTV."
+        )
+        rate, amort, balloon = _loan_inputs(
+            label_prefix="",
+            key_prefix=SHARED_LOAN_WIDGET_KEY_PREFIX,
+        )
 
     tab1, tab2, tab3 = st.tabs(["Implied Price", "Down Payment", "Cap at Fixed Price"])
     with tab1:
@@ -659,9 +716,9 @@ def main() -> None:
             rate,
             amort,
             balloon,
+            sweep,
             price_raw=price_raw,
             operating_noi_raw=operating_noi_raw,
-            listing_cap_pct=listing_cap_pct,
             loan_down_pct=loan_down_pct,
         )
     with tab3:
@@ -672,7 +729,6 @@ def main() -> None:
             sweep,
             price_raw=price_raw,
             operating_noi_raw=operating_noi_raw,
-            listing_cap_pct=listing_cap_pct,
             loan_down_pct=loan_down_pct,
         )
 

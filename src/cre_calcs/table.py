@@ -8,7 +8,7 @@ from tabulate import tabulate
 
 from cre_calcs.model import Listing, LoanTerms
 from cre_calcs.mortgage import annual_debt_service, remaining_balance_after_months
-from cre_calcs.scenarios import ScenarioRow
+from cre_calcs.scenarios import ScenarioRow, YearProjectionRow
 
 
 def _balloon_balance(purchase_price: float, loan: LoanTerms) -> float:
@@ -56,8 +56,9 @@ def balloon_cash_flow_line(
     *,
     net_operating_income: float,
     price_label: str = "offer",
+    income_year: int | None = None,
 ) -> str:
-    """Year-one pre-tax cash flow (NOI − debt service) at a fixed price."""
+    """Pre-tax cash flow (NOI − debt service) at a fixed price."""
     principal = purchase_price * (1.0 - loan.down_payment_fraction)
     ads = annual_debt_service(
         principal=principal,
@@ -66,9 +67,31 @@ def balloon_cash_flow_line(
     )
     annual_cf = net_operating_income - ads
     monthly_cf = annual_cf / 12.0
+    year_phrase = "Year-one" if income_year in (None, 1) else f"Year {income_year}"
     return (
-        f"Year-one cash flow {_price_phrase(purchase_price, price_label=price_label)} price, "
+        f"{year_phrase} cash flow {_price_phrase(purchase_price, price_label=price_label)} price, "
         f"estimated ${monthly_cf:,.0f}/mo (${annual_cf:,.0f}/yr)"
+    )
+
+
+def balloon_exit_line(
+    loan: LoanTerms,
+    *,
+    purchase_price: float,
+    exit_noi: float,
+    valuation_cap_rate: float,
+    price_label: str = "offer",
+) -> str:
+    """Exit valuation at balloon using escalated NOI and amortized loan balance."""
+    if valuation_cap_rate <= 0:
+        raise ValueError("valuation_cap_rate must be positive")
+    exit_value = exit_noi / valuation_cap_rate
+    balloon_balance = _balloon_balance(purchase_price, loan)
+    net_proceeds = exit_value - balloon_balance
+    return (
+        f"Balloon exit (year {loan.balloon_years}) at {price_label} price: "
+        f"value ${exit_value:,.0f} (NOI ${exit_noi:,.0f} ÷ {valuation_cap_rate:.2%}), "
+        f"balance ${balloon_balance:,.0f}, net proceeds ${net_proceeds:,.0f}"
     )
 
 
@@ -78,6 +101,9 @@ def balloon_context_lines(
     net_operating_income: float | None = None,
     list_price: float | None = None,
     offer_price: float | None = None,
+    exit_noi: float | None = None,
+    valuation_cap_rate: float | None = None,
+    income_year: int | None = None,
 ) -> list[str]:
     """List (NOI ÷ cap) and offer (purchase price) balloon snapshots plus offer cash flow."""
     lines: list[str] = []
@@ -94,6 +120,17 @@ def balloon_context_lines(
                     offer_price,
                     loan,
                     net_operating_income=net_operating_income,
+                    price_label="offer",
+                    income_year=income_year,
+                )
+            )
+        if exit_noi is not None and valuation_cap_rate is not None:
+            lines.append(
+                balloon_exit_line(
+                    loan,
+                    purchase_price=offer_price,
+                    exit_noi=exit_noi,
+                    valuation_cap_rate=valuation_cap_rate,
                     price_label="offer",
                 )
             )
@@ -145,6 +182,39 @@ def scenario_rows_matrix(rows: list[ScenarioRow]) -> tuple[list[str], list[list[
             ]
         )
         data.append(row_out)
+    return headers, data
+
+
+def year_projection_matrix(rows: list[YearProjectionRow]) -> tuple[list[str], list[list[str]]]:
+    """Headers and formatted cells for a year-by-year operating projection."""
+    headers = [
+        "Year",
+        "NOI",
+        "Debt Service",
+        "Cash Flow",
+        "Cash-on-Cash",
+        "Loan Balance",
+        "Property Value",
+        "DSCR",
+        "LTV",
+    ]
+    data: list[list[str]] = []
+    for r in rows:
+        dscr = "" if r.debt_service_coverage_ratio is None else f"{r.debt_service_coverage_ratio:.2f}x"
+        coc = "n/a" if math.isnan(r.cash_on_cash) else f"{r.cash_on_cash:.2%}"
+        data.append(
+            [
+                str(r.year),
+                f"${r.net_operating_income:,.0f}",
+                f"${r.annual_debt_service:,.0f}",
+                f"${r.cash_flow:,.0f}",
+                coc,
+                f"${r.loan_balance:,.0f}",
+                f"${r.property_value:,.0f}",
+                dscr,
+                f"{r.loan_to_value:.2%}",
+            ]
+        )
     return headers, data
 
 

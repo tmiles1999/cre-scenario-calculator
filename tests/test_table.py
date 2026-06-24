@@ -7,6 +7,7 @@ from cre_calcs.scenarios import build_cap_implied_price_scenarios, build_cap_rat
 from cre_calcs.mortgage import annual_debt_service
 from cre_calcs.table import (
     balloon_context_lines,
+    balloon_exit_line,
     format_scenario_table,
     scenario_rows_matrix,
 )
@@ -40,6 +41,45 @@ def test_balloon_context_lines_list_offer_and_cash_flow() -> None:
         f"estimated ${annual_cf / 12.0:,.0f}/mo (${annual_cf:,.0f}/yr)"
     )
     assert "Balloon payment" not in "\n".join(lines)
+
+
+def test_balloon_context_lines_includes_exit_when_escalated() -> None:
+    list_price = 2_596_800.0
+    offer_price = 2_300_000.0
+    y1_noi = 155_808.0
+    exit_noi = y1_noi * (1.03**4)
+    valuation_cap = y1_noi / offer_price
+    loan = LoanTerms(0.25, 0.065, 25, 5)
+    lines = balloon_context_lines(
+        loan,
+        net_operating_income=exit_noi,
+        list_price=list_price,
+        offer_price=offer_price,
+        exit_noi=exit_noi,
+        valuation_cap_rate=valuation_cap,
+        income_year=5,
+    )
+    assert len(lines) == 4
+    assert "Balloon exit" in lines[-1]
+    assert "net proceeds" in lines[-1]
+    assert "Year 5 cash flow" in lines[2]
+
+
+def test_balloon_exit_line_values() -> None:
+    loan = LoanTerms(0.25, 0.065, 25, 5)
+    offer_price = 2_300_000.0
+    y1_noi = 155_808.0
+    exit_noi = y1_noi * (1.03**4)
+    valuation_cap = y1_noi / offer_price
+    line = balloon_exit_line(
+        loan,
+        purchase_price=offer_price,
+        exit_noi=exit_noi,
+        valuation_cap_rate=valuation_cap,
+    )
+    exit_value = exit_noi / valuation_cap
+    assert f"value ${exit_value:,.0f}" in line
+    assert "net proceeds" in line
 
 
 def test_format_scenario_table_includes_headers_and_balloon_context() -> None:
